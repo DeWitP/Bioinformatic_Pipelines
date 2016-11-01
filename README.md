@@ -16,5 +16,6 @@
 
 ### You can easily download all the files found here to the remote server by (while being located in the right folder), typing:
 
-### "git clone git@github.com:DeWitP/pipelines_2015.git"
+### "git clone git@github.com:DeWitP/Bioinformatic_Pipelines.git"
 
+### You might need an ssh key in order to be allowed to clone the repository.
