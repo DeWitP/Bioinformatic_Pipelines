@@ -1,0 +1,382 @@
+#!/bin/bash
+
+#-------------------------------------------------------------------------
+#-------------------------------------------------------------------------
+### EXERCISE 1. MAPPING, READ COUNTS AND VISUALIZATION-----------------###
+#-------------------------------------------------------------------------
+#-------------------------------------------------------------------------
+# 
+#  
+# Mapping refers to the process of aligning short reads to a reference sequence, whether the reference is a complete genome, 
+# transcriptome, or a de novo genome/transcriptome assembly. There are numerous programs that have been developed to map 
+# reads to a reference sequence that vary in their algorithms and therefore speed (see Flicek and Birney 2009 and references therein). 
+# The program that we will utilize is called BWA (Li and Durbin 2009).  It uses a Burrow’s Wheeler Transform method that results in 
+# much faster processing than the first wave of programs that used a hash-based algorithm such as MAQ (Li et al. 2008). 
+# 
+# The goal of mapping is to create an alignment file also known as a Sequence/Alignment Map (SAM) file for each of your samples. 
+# This SAM file will contain one line for each of the reads in your sample denoting the reference sequence (genes, contigs, or gene regions) 
+# to which it maps, the position in the reference sequence, and a Phred-scaled quality score of the mapping, among other details (Li et al. 2009). 
+# We will then use the SAM files to visualize the alignment in a browser called IGV, and also count the number of reads that map to each reference 
+# contig, data that could for example form the basis of a differential gene expression analysis. Later, we will also use the SAM files to identify 
+# polymorphisms across the dataset and to genotype the 23 individuals.
+# 
+# There are several parameters that can be defined for the alignment process, including: the number of differences allowed between reference and query (-n), 
+# the length (-l) and number of differences allowed in the seed (-k), the number allowed and penalty for gap openings (-o, -O), and the 
+# number and penalty for gap extensions (-e, -E). Changing these parameters will change the number and quality of reads that map to reference 
+# and the time it takes to complete mapping a sample. For a complete list of the parameters and their default values go to 
+# http://bio-bwa.sourceforge.net/bwa.shtml. 
+# 
+# 
+# We will map the reads from each of your trimmed and clipped FASTQ files to a de novo reference assembly like the one you created yesterday. 
+# Specifically, we will 1) create an index for the reference assembly (just once), which will help the aligner (and other downstream software) 
+# to quickly scan the reference, 2) for each sample, map reads to the reference assembly, and 3) convert the resulting file into the SAM file 
+# format and append “read group” names to the SAM file for each sample. Steps 2 and 3 are “piped,” or put together feeding the output of one 
+# program in as the input for the next program. The read groups, which can have the same names as your sample names, will be appended to each 
+# file and will become critical for the downstream SNP detection step. The read group name in each SAM file will connect the reads back to 
+# individual samples after files have been merged for SNP detection. 
+# 
+# We then want to remove all duplicate reads, for which we need to use the MarkDuplicates program from the software package “Picard”. 
+# Picard uses the binary equivalent of SAM files, BAM, as input, so first we need to convert the files using SAMtools.
+
+
+#First, we need to login to the remote server:
+
+ssh USER@albiorix.bioenv.gu.se
+
+#Then, we login to a compute node:
+
+qlogin -q high_mem
+
+# Move to your work directory, and copy the course files there:
+
+cp /nobackup/data18/Assembly_exercise/files/mapping exercise.zip .
+
+unzip mapping exercise.zip
+
+cd mapping_exercise/data
+
+gunzip *.gz
+
+#Load in the modules that we will need for our analyses:
+
+module load bwa/v0.7.17
+module load samtools/v1.9
+module load Java/v1.8.0_191
+
+#Indexing reference library (the dictionary and the .fai index files will be needed later):  
+
+bwa index -p assembly -a is ./assembly/Ibalthica_transcriptome.fasta
+
+Dictionary="./assembly/Ibalthica_transcriptome.dict"
+
+if [ -f  "$Dictionary" ]; 
+then 
+	echo "Ibalthica_transcriptome.dict already created"
+else
+	echo "file does not exist"
+ 	java -jar ../scripts/CreateSequenceDictionary.jar R= ./assembly/Ibalthica_transcriptome.fasta O= ./assembly/Ibalthica_transcriptome.dict
+fi
+
+samtools faidx ./assembly/Ibalthica_transcriptome.fasta
+
+#Mapping and converting to SAM file format:
+
+# It is in many cases very useful to test the effects of the different parameters on the alignment. Parameters that you can specify in bwa are:
+# 
+# -n NUM 	Maximum edit distance if the value is INT, or the fraction of missing alignments given 2% uniform base error rate if FLOAT. In the latter case, the maximum edit distance is automatically chosen for different read lengths. [0.04] 
+# -o INT 	Maximum number of gap opens [1] 
+# -e INT 	Maximum number of gap extensions, -1 for k-difference mode (disallowing long gaps) [-1] 
+# -d INT 	Disallow a long deletion within INT bp towards the 3’-end [16] 
+# -i INT 	Disallow an indel within INT bp towards the ends [5] 
+# -l INT 	Take the first INT subsequence as seed. If INT is larger than the query sequence, seeding will be disabled. For long reads, this option is typically ranged from 25 to 35 for ‘-k 2’. [inf] 
+# -k INT 	Maximum edit distance in the seed [2] 
+# -t INT 	Number of threads (multi-threading mode) [1] 
+# -M INT 	Mismatch penalty. BWA will not search for suboptimal hits with a score lower than (bestScore-misMsc). [3] 
+# -O INT 	Gap open penalty [11] 
+# -E INT 	Gap extension penalty [4] 
+# 
+# The parameters that potentially can have the largest effects on the output (and the speed) are –n (maximum allowed mismatches), -l (size of the seed) and –k (maximum allowed mismatches in the seed). 
+
+# Feel free to change the parameters in the command below, and note down how long it takes to finish. Keep the number of threads (-t) to 1, however.
+
+for i in *trimmed.fq;
+do
+	echo working with "$i"
+	newfile="$(basename $i _trimmed.fq)"
+	bwa aln -n .01 -k 5 -l 30 -t 1 assembly $i |bwa samse assembly - $i | ../scripts/AddReadGroup.pl -i - -o ${newfile}.sam -r ${newfile} -s ${newfile} -l ${newfile} -p Illumina
+
+
+done;
+
+# When the computer has finished mapping, we want to see what the .sam file format looks like. We can easily view the bottom 50 lines of a file using the very useful bash command “tail”. 
+
+tail -50 FT15-c01.sam > FT15-c01_tail_50.txt
+
+# Then open the newly created file with a text editor to see the results.
+# To learn what the different column represent, see http://samtools.sourceforge.net/SAM1.pdf for details on the SAM file format.
+
+# From now on, we will work with the binary equivalent of the SAM file format: BAM. BAM files take up less place on a hard drive, 
+# and can be processed faster. Most SNP detection software are made to process BAM files. The drawback is that they cannot be examined 
+# directly in a text editor. Our first task is to remove any duplicate reads from the alignments, for which we also need to sort our 
+# aligned reads by alignment position.
+# 
+# Identical, duplicate reads can be a result of biology and represent highly expressed transcripts. However, they are also quite likely 
+# to be an artifact of the PCR step in the sample preparation procedure. As we cannot distinguish between these two factors, it is prudent 
+# to remove duplicates from the dataset if we want to study gene expression differences. Artifactual duplicates can also skew genotype 
+# estimates so they must be identified also for SNP estimation. 
+
+#Convert SAM file to .bam | sort .bam with Samtools and Mark Duplicates with Picard Tools:
+
+for i in *.sam;
+do
+	newfile="$(basename $i .sam)"
+	samtools view -bS $i | samtools sort -o $i.sorted.bam
+	java -Xmx2g -jar ../scripts/MarkDuplicates.jar INPUT=$i.sorted.bam OUTPUT=${newfile}.dedup.bam  METRICS_FILE=${newfile}.metricsfile MAX_FILE_HANDLES_FOR_READ_ENDS_MAP=250 ASSUME_SORTED=true VALIDATION_STRINGENCY=SILENT REMOVE_DUPLICATES=True
+done;
+
+# In order to examine the deduplicated files and count mapped reads, we need to convert them back to sam files.
+
+for i in *.dedup.bam;
+do
+        newfile="$(basename $i .bam)"
+        samtools view -h $i > ${newfile}.sam
+done;
+
+# Now, we can count the number of mapping reads using the python script "countxpression.py", which is located in the "scripts" subdirectory.
+
+# The first argument is the mapping quality threshold, the second argument is a length threshold, summarystats.txt is an output file combining 
+# count statistics from all files. The last argument tells the program to count reads from all .sam files in the folder.
+
+../scripts/countxpression.py 20 20 summarystats.txt *dedup.sam
+
+# Take a look at the summary stats output. What fraction of your reads mapped to only one place in the assembly (column called PropQualAligned)? 
+# This number can be an indication of the assembly quality, and also if there are contaminant sequences in your fastq files.
+
+# Study the “counts.txt” file from an individual. The second column of data is the number of unique reads mapped to each contig, and could be 
+# used for gene expression analysis or just to assess what proportion of the contigs have been sequenced to a certain depth.  
+
+# As a last step for this exercise, we can view the results of the alignment using a genome browser. IGV (Integrative Genomics Viewer) is an excellent 
+# java-based such, which is freely available from the Broad Institute. Unfortunately, it is a bit tricky to get it to work remotely, so you will 
+# have to copy the assembly file (./assembly/Ibalthica_transcriptome.fasta) and the deduplicated SAM alignment file of interest (just choose one) 
+# to your local computer using scp or with graphical ssh software such as mobaXterm or Cyberduck.
+
+# Once you have gotten IGV started, load in the assembly (Genomes -> Load genome from file), then load in the deduplicated SAM file 
+# (File -> Load from file…). When it asks you to create an index, click on OK. Now you can browse the contigs in the assembly, see 
+# where the reads have aligned, and where there are sequencing errors or potential SNPs.  
+
+#-------------------------------------------------------------------------
+#-------------------------------------------------------------------------
+### EXERCISE 2. VARIANT DETECTION USING THE GATK ----------------------###
+#-------------------------------------------------------------------------
+#-------------------------------------------------------------------------
+
+# Single nucleotide polymorphisms (SNPs) are one of the fundamental types of genetic variation, and with the growing popularity 
+# of next-generation sequencing, they are becoming the most ubiquitously utilized genetic markers in both evolutionary and 
+# biomedical research. An issue, however, is to separate true polymorphisms from sequencing or alignment artefacts, for which 
+# extensive filtering based on statistical models is necessary. There is to date no perfect way to do this, especially for non-model 
+# organisms, so it is always prudent to be stringent in filtering if unsure.
+
+# In this exercise, we will walk through the steps necessary to identify good quality SNPs from population-level next-generation 
+# sequencing data and we’ll extract genotype information whenever possible from the SNP call dataset. 
+# For all the data processing steps within this section, we have chosen to follow the recommendations of the Broad Institute, 
+# created for the Genome Analysis Toolkit (GATK): http://www.broadinstitute.org/gatk/guide/topic?name=best-practices
+# We highly recommend keeping an eye on the instructions of this site for more information and updated protocols. They also have 
+# an excellent forum for posting technical questions. The only step in their protocol that we do not use is the Base Quality Score recalibration, 
+# as this step requires a list of known variant sites as input. The focus of this course is on non-model organisms, for which there typically 
+# are no a priori known variant sites. If you do have access to this type of data, it is highly recommended to follow the instructions on the GATK site.
+
+# There are three major steps to this section of the protocol. First, we need to process our alignment files slightly. 
+# We start by merging all the deduplicated .bam files from section 4 into one file called merged.bam, which will be our base for SNP discovery. 
+# At this step, it is crucial that the “read group” headings for your samples (which we specified yesterday) are correct, as they will be used 
+# to keep track of the samples within the merged .bam file. We then index our merged .bam file and search through the file for areas containing 
+# indels, where the initial mapping might be of poor quality. By using information from all samples in the merged file in a realignment step, we 
+# improve our chances of correctly aligning these regions.
+
+# The merged realigned .bam file is what we will use in the next step, variant (SNP) detection and genotyping. An initial search for only 
+# very high-quality variant sites outputs a .vcf file, which is a list of all variant sites and the genotypes of all individuals for those sites. 
+# For information about the vcf file format, see (http://www.1000genomes.org/node/101).
+# 
+# For purposes of this exercise, we will consider the high-quality variants “true” sites for further processing. An additional search for 
+# variant sites, now with a lower quality threshold, is then conducted and by using our “true” variant sites from the first search we can 
+# build a Gaussian mixture model to separate true variants from false positives using a log-odds ratio (VQSLOD) of a variant being true vs. 
+# being false: (http://www.broadinstitute.org/gatk/gatkdocs/org_broadinstitute_sting_gatk_walkers_variantrecalibration_VariantRecalibrator.html). 
+# 
+# Following this, we can extract the genotype information for each individual from the .vcf file, while specifying a genotype quality threshold, 
+# and use this information to calculate allele and genotype frequencies. As Alex has covered, there are probability-based approaches available, 
+# which allow for a lower sequencing depth, but for simplicity we will today use Q=20 (p=0.99) as a threshold.
+# 
+# We can then use this data for any downstream population genomic analysis e.g. conduct PCA and FST outlier analyses.
+
+###------- STEP 1. Preparing input files:
+
+# Merge your deduplicated .bam files into one file and index the merged file, using samtools, with the commands samtools  merge and samtools index
+
+# Open the tab-delimited text file called rg.txt, which is located along with your data files. This file provides critical information for GATK to keep the individuals apart in the merged file. It should be formatted like this (new line for each sample):
+	
+#    @RG	ID:READ_GROUP	SM:SAMPLE_NAME	PL:Illumina
+#	 ...
+
+#   Merge your deduplicated .bam files from this morning’s exercise:
+
+samtools merge -h rg.txt merged.bam *dedup.bam
+
+# Index your merged .bam file so that GATK will be able to search through it: 
+
+samtools index merged.bam
+
+###------- STEP 2. Realign around InDels using the GATK.
+
+#Identify regions in need of realignment:
+# Java v 1.8 is required for running GATK version 3.8 (which is NOT the newest version, if you use another version you might need to change the syntax).
+
+java -Xmx2g -jar ../scripts/GenomeAnalysisTK_3_8.jar \
+  -T RealignerTargetCreator \
+  -R ./assembly/Ibalthica_transcriptome.fasta \
+  -o merged_output.intervals \
+  -I merged.bam 
+  
+#  defaults for optional parameters:
+#  --minReadsAtLocus N [the minimum coverage at a locus for the entropy calculation to be enabled; default=4]
+#  --windowSize N [any two SNP calls and/or high entropy positions are considered clustered when they occur no more than N basepairs apart; default=10]
+#  --mismatchFraction f [fraction of total sum of base qualities at a position that need to mismatch for the position to be considered to have high entropy; default=0.15; to disable, set to <= 0 or > 1]
+#  Note that this fraction should be adjusted based on your particular data set. For deep coverage and/or when looking for indels with low allele frequency, this number should be smaller.
+#  --maxIntervalSize [max size in bp of intervals that we'll pass to the realigner; default=500]
+
+#-------------------------------------------------------------------------
+
+#  Run realigner over intervals:
+
+java -Xmx4g -jar ../scripts/GenomeAnalysisTK_3_8.jar \
+  -I merged.bam \
+  -R ./assembly/Ibalthica_transcriptome.fasta \
+  -T IndelRealigner \
+  -targetIntervals merged_output.intervals \
+  -o merged_realigned.bam 
+
+
+#Optional parameters:
+# -compress 0 \
+#    this argument recommended to speed up the process *if* this is only a temporary file; otherwise, use the default value
+#    defaults for optional parameters:
+# -compress, --bam_compression; Compression level to use for output bams; [default:5].
+# -LOD, --LODThresholdForCleaning; LOD threshold above which the realigner will proceed to realign; default=5.0]
+#    This term is equivalent to "significance" - i.e. is the improvement significant enough to merit realignment? Note that this number should be adjusted based on your particular data set. For low coverage and/or when looking for indels with low allele frequency, this number should be smaller.
+# -targetNotSorted, --targetIntervalsAreNotSorted; This tool assumes that the target interval list is sorted; if the list turns out to be unsorted, it will throw an exception. Use this argument when your interval list is not sorted to instruct the Realigner to first sort it in memory.
+# -knownsOnly, --useOnlyKnownIndels; Don't run 'Smith-Waterman' to generate alternate consenses; use only known indels provided as RODs for constructing the alternate references. 
+
+#--------------------------------------------------------------------------
+
+###------- STEP 3. Calling and annotating variants:
+
+# Calling only very high-quality SNPs with the Unified Genotyper caller:
+# This will likely find only the most obvious variant sites. We will use this dataset as "true" sites for the Variant Score Quality Recalibrator (VQSR) in the next step.
+
+# Java v 1.8 is required for running GATK version 3.8 (which is NOT the newest version, if you use another version you might need to change the syntax).
+
+
+java -Xmx16g -jar ../scripts/GenomeAnalysisTK_3_8.jar \
+     -T UnifiedGenotyper \
+     -R ./assembly/Ibalthica_transcriptome.fasta \
+     -I merged_realigned.bam \
+     -stand_call_conf 20.0 \
+     -o raw_snps_indels_Q20.vcf
+
+
+# Selecting an appropriate quality score threshold (from the Broad Institute's Wiki site):
+# A common question is the confidence score threshold to use for variant detection. We recommend:
+# Deep (> 10x coverage per sample) data 
+# we recommend a minimum confidence score threshold of Q30 with an emission threshold of Q10. These Q10-Q30 calls will be emitted filtered out as LowQual. 
+# Shallow (< 10x coverage per sample) data 
+# because variants have by necessity lower quality with shallower coverage, we recommend a min. confidence score of Q4 and an emission threshold of Q3. 
+
+
+#Now, we can call variants with a threshold appropriate for our sequence coverage
+
+java -Xmx16g -jar ../scripts/GenomeAnalysisTK_3_8.jar \
+     -T UnifiedGenotyper \
+     -R ./assembly/Ibalthica_transcriptome.fasta \
+     -I merged_realigned.bam \
+     -stand_call_conf 3.0 \
+     -o raw_snps_indels_Q3.vcf
+
+#And finally, we annotate the list of variants for the VariantRecalibration to be run properly
+
+java -Xmx16g -jar ../scripts/GenomeAnalysisTK_3_8.jar \
+  -T VariantAnnotator \
+  -R ./assembly/Ibalthica_transcriptome.fasta \
+  -I merged_realigned.bam \
+  -o raw_snps_indels_Q3_annotated.vcf \
+  --variant raw_snps_indels_Q3.vcf \
+  -L raw_snps_indels_Q3.vcf
+
+# View the bottom 10 lines of the annotated Q3 .vcf file with:
+
+tail raw_snps_indels_Q3_annotated.vcf
+
+# And try to find the genotype quality scores (GQ) for each individual at the last few SNPs in the file. 
+# These are what we are interested in extracting at the end of the day. But first we need to filter out false 
+# positives, while at the same time keeping as many as possible of the true positives.
+
+
+
+###------- STEP 4. Variant recalibration based on a set of known variant sites:
+
+# Variant recalibrator. 
+# With this limited dataset, we will focus on SNPs only. This could also be done for InDels, however.
+# Due to the small size of out dataset, we might get this error message:
+
+### ERROR MESSAGE: NaN LOD value assigned. Clustering with this few variants and these annotations is unsafe. 
+### Please consider raising the number of variants used to train the negative model (via --percentBadVariants 0.05, for example) 
+### or lowering the maximum number of Gaussians to use in the model (via --maxGaussians 4, for example).
+
+#If you do get this message, try changing the settings for -minNumBad and --maxGaussians in the following command.
+
+# Start by training the machine learning algorithm what characterizes a "good" SNP (using the Q20 data as a "true" training set). 
+# NOTE - In reality you would here use a much much better training set, this is only for practise purposes!
+
+java -Xmx4g -jar ../scripts/GenomeAnalysisTK_3_8.jar \
+   -T VariantRecalibrator \
+   -R ./assembly/Ibalthica_transcriptome.fasta \
+   -input raw_snps_indels_Q3_annotated.vcf \
+   -minNumBad 50 --maxGaussians 2 \
+   -resource:concordantSet,known=true,training=true,truth=true,prior=10.0 raw_snps_indels_Q20.vcf \
+   -an QD -an MQRankSum -an ReadPosRankSum -an FS -an DP \
+   -mode SNP \
+   -recalFile VQSR_SNP.recal \
+   -tranchesFile VQSR_SNP.tranches
+
+
+#Applying the recalibration, passing only the 99.9 truth sensitivity tranche
+   
+java -Xmx3g -jar ../scripts/GenomeAnalysisTK_3_8.jar \
+   -T ApplyRecalibration \
+   -R ./assembly/Ibalthica_transcriptome.fasta \
+   -input raw_snps_indels_Q3_annotated.vcf \
+   -tranchesFile VQSR_SNP.tranches \
+   -recalFile VQSR_SNP.recal \
+   -o recalibratedSNPs.vcf \
+   --ts_filter_level 99.9 \
+   -mode SNP
+   
+
+#Finally, save all the SNPS that have passed the VQSR filter into a new vcf file:
+
+grep "PASS\|^#" recalibratedSNPs.vcf > VQSR_PASS_SNPS.vcf
+
+# Let's start examining the vcf file by just looking at the bottom lines:
+
+tail VQSR_PASS_SNPS.vcf
+
+# We can also extract a genotype matrix from the vcf file, using our getgenosfromvcf.py python script, here we filter for a genotype quality of 20:
+
+../scripts/getgenosfromvcf.py VQSR_PASS_SNPS.vcf Genotypes.txt rows 20
+
+# From this file, we can keep only SNPs for which there are good genotypes in all individuals:
+
+grep -v "\." Genotypes.txt > genotypes_shared_by_all.txt
+
+# How many SNPs do we have in these two files (number of lines minus 1)?
+
+cat –b Genotypes.txt
+
+cat –b genotypes_shared_by_all.txt
