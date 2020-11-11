@@ -377,6 +377,6 @@ grep -v "\." Genotypes.txt > genotypes_shared_by_all.txt
 
 # How many SNPs do we have in these two files (number of lines minus 1)?
 
-cat –b Genotypes.txt
+cat -b Genotypes.txt
 
-cat –b genotypes_shared_by_all.txt
+cat -b genotypes_shared_by_all.txt
