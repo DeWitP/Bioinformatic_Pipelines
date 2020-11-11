@@ -49,9 +49,9 @@ qlogin -q high_mem
 
 # Move to your work directory, and copy the course files there:
 
-cp /nobackup/data18/Assembly_exercise/files/mapping exercise.zip .
+cp /nobackup/data18/Assembly_exercise/files/mapping_exercise.zip .
 
-unzip mapping exercise.zip
+unzip mapping_exercise.zip
 
 cd mapping_exercise/data
 
